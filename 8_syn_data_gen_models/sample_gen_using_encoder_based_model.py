@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from scipy.sparse import coo_matrix
+import csv
 
 # 1. Load FSQ check-in data
 checkins = pd.read_csv('fsq_original_dataset/singapore_checkins.txt', sep='\t', names=['user_id', 'poi_id', 'timestamp', 'misc'])
@@ -115,42 +116,53 @@ for epoch in range(10):
         optimizer.step()
     print(f"Epoch {epoch+1}, Loss: {loss.item():.4f}")
 
-# 6. Generate synthetic users by sampling latent space
-n_synth = 1000
-with torch.no_grad():
-    latent_samples = torch.randn(n_synth, 32)  # Sample from standard normal
-    synth_matrix = model.decoder(latent_samples).numpy()
-    synth_matrix = (synth_matrix > 0.5).astype(int)  # Binarize
+# 6. Generate synthetic users by sampling latent space, streaming to avoid OOM
+import csv
 
-# 7. Convert to synthetic check-in records
-synth_checkins = []
-for i, user_row in enumerate(synth_matrix):
-    for j, val in enumerate(user_row):
-        if val:
-            poi_idx_val = j // len(timebins)
-            timebin_idx_val = j % len(timebins)
+n_synth = 1000
+latent_dim = 32
+batch_synth = 10  # Number of synthetic users to process at once
+output_path = '8_syn_data_gen_models/synthetic_checkins_autoencoder.csv'
+
+# Precompute candidate timestamps for each (poi_id, timebin)
+candidate_timestamps = {}
+for (poi_id, timebin), group in checkins.groupby(['poi_id', 'timebin']):
+    times = group['parsed_time'].dropna().values
+    if len(times) > 0:
+        candidate_timestamps[(poi_id, timebin)] = times
+all_times = checkins['parsed_time'].dropna().values
+
+# Write header
+with open(output_path, 'w', newline='') as f:
+    writer = csv.DictWriter(f, fieldnames=['user_id', 'poi_id', 'timestamp', 'timebin'])
+    writer.writeheader()
+
+    synth_user_counter = 0
+    for batch_start in range(0, n_synth, batch_synth):
+        curr_batch = min(batch_synth, n_synth - batch_start)
+        with torch.no_grad():
+            latent_samples = torch.randn(curr_batch, latent_dim)
+            synth_matrix = model.decoder(latent_samples).numpy()
+            synth_matrix = (synth_matrix > 0.5).astype(int)  # Binarize
+        user_idx_arr, feat_idx_arr = np.nonzero(synth_matrix)
+        for u, f in zip(user_idx_arr, feat_idx_arr):
+            poi_idx_val = f // len(timebins)
+            timebin_idx_val = f % len(timebins)
             poi_id = poi_ids[poi_idx_val]
             timebin = timebins[timebin_idx_val]
-            # Generate a plausible timestamp for this timebin
-            tod, week, season = timebin.split('_')
-            # Pick a random date in the dataset matching the season and week type
-            candidates = checkins[(checkins['poi_id'] == poi_id) &
-                                   (checkins['time_of_day'] == tod) &
-                                   (checkins['week_bin'] == week) &
-                                   (checkins['season'] == season)]['parsed_time']
-            if not candidates.empty:
-                ts = np.random.choice(candidates.values)
-                ts_str = pd.Timestamp(ts).strftime('%a %b %d %H:%M:%S +0000 %Y')
+            candidates = candidate_timestamps.get((poi_id, timebin), None)
+            if candidates is not None and len(candidates) > 0:
+                ts = np.random.choice(candidates)
             else:
-                # Fallback: pick any random timestamp from the dataset
-                ts = np.random.choice(checkins['parsed_time'].dropna().values)
-                ts_str = pd.Timestamp(ts).strftime('%a %b %d %H:%M:%S +0000 %Y')
-            synth_checkins.append({
-                'user_id': f'synth_user_{i+1}',
+                ts = np.random.choice(all_times)
+            ts_str = pd.Timestamp(ts).strftime('%a %b %d %H:%M:%S +0000 %Y')
+            writer.writerow({
+                'user_id': f'synth_user_{batch_start + u + 1}',
                 'poi_id': poi_id,
                 'timestamp': ts_str,
                 'timebin': timebin
             })
+        synth_user_counter += curr_batch
+        print(f"Generated {synth_user_counter} synthetic users...")
 
-pd.DataFrame(synth_checkins).to_csv('8_syn_data_gen_models/synthetic_checkins_autoencoder.csv', index=False)
-print(f"Generated {len(synth_checkins)} synthetic check-ins using autoencoder. Output saved to synthetic_checkins_autoencoder.csv.")
+print(f"Generated {n_synth} synthetic users using autoencoder. Output saved to synthetic_checkins_autoencoder.csv.")
