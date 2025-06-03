@@ -5,7 +5,6 @@ import pandas as pd
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.feature_extraction.text import TfidfVectorizer
-from difflib import SequenceMatcher
 import os
 
 # Load POI metadata for both datasets
@@ -23,8 +22,8 @@ else:
 # Combine POI metadata for similarity search
 all_poi_meta = pd.concat([fsq_poi_meta, google_poi_meta]).drop_duplicates('poi_id')
 
-# Load check-ins for FSQ
-df = pd.read_csv('fsq_original_dataset/singapore_checkins.txt', sep='\t', names=['user_id', 'poi_id', 'timestamp'])
+# Load check-ins for FSQ (fix column order)
+df = pd.read_csv('fsq_original_dataset/singapore_checkins.txt', sep='\t', names=['user_id', 'poi_id', 'timestamp', 'misc'])
 
 # Count check-ins per POI
 df_poi_counts = df['poi_id'].value_counts()
@@ -32,32 +31,55 @@ df_poi_counts = df['poi_id'].value_counts()
 # Define sparse POIs (e.g., <= 5 check-ins)
 sparse_pois = df_poi_counts[df_poi_counts <= 5].index.tolist()
 
-# Use POI name string similarity as a proxy for similarity
-from difflib import SequenceMatcher
-
-def approx_match(a, b, threshold=0.6):
-    return SequenceMatcher(None, a, b).ratio() > threshold
-
 # Identify non-sparse POIs (from both datasets)
 non_sparse_pois = df_poi_counts[df_poi_counts > 5].index.tolist()
 non_sparse_meta = all_poi_meta[all_poi_meta['poi_id'].isin(non_sparse_pois)]
 
+# Use TF-IDF + cosine similarity for POI name matching
+sparse_meta = all_poi_meta[all_poi_meta['poi_id'].isin(sparse_pois)]
+
+# Drop rows with missing or blank POI names
+def clean_poi_meta(meta):
+    meta = meta.dropna(subset=['poi_name'])
+    meta = meta[meta['poi_name'].astype(str).str.strip() != '']
+    return meta
+
+sparse_meta = clean_poi_meta(sparse_meta)
+non_sparse_meta = clean_poi_meta(non_sparse_meta)
+
+# Debugging: Print info about POI sets and metadata
+print(f"Total unique POI IDs in check-ins: {df['poi_id'].nunique()}")
+print(f"Total unique POI IDs in metadata: {all_poi_meta['poi_id'].nunique()}")
+print(f"Sample POI IDs in check-ins: {df['poi_id'].astype(str).head(10).tolist()}")
+print(f"Sample POI IDs in metadata: {all_poi_meta['poi_id'].astype(str).head(10).tolist()}")
+print(f"POI ID dtype in check-ins: {df['poi_id'].dtype}")
+print(f"POI ID dtype in metadata: {all_poi_meta['poi_id'].dtype}")
+print(f"Sparse POIs (after cleaning): {len(sparse_meta)}")
+print(f"Non-sparse POIs (after cleaning): {len(non_sparse_meta)}")
+print("Sample sparse_meta:")
+print(sparse_meta.head())
+print("Sample non_sparse_meta:")
+print(non_sparse_meta.head())
+
+if sparse_meta.empty or non_sparse_meta.empty:
+    print("No valid POI names for matching. Exiting.")
+    exit(1)
+
+# Prepare TF-IDF matrix for all POI names
+vectorizer = TfidfVectorizer().fit(pd.concat([sparse_meta['poi_name'], non_sparse_meta['poi_name']]).astype(str))
+sparse_name_vecs = vectorizer.transform(sparse_meta['poi_name'].astype(str))
+non_sparse_name_vecs = vectorizer.transform(non_sparse_meta['poi_name'].astype(str))
+
 synthetic_checkins = []
-for sparse_poi in sparse_pois:
-    sparse_row = all_poi_meta[all_poi_meta['poi_id'] == sparse_poi]
-    if sparse_row.empty:
-        continue
-    sparse_name = sparse_row.iloc[0]['poi_name']
-    # Find the most similar non-sparse POI by approximate string match
-    best_score = 0
-    best_donor = None
-    for _, donor_row in non_sparse_meta.iterrows():
-        donor_name = donor_row['poi_name']
-        score = SequenceMatcher(None, str(sparse_name), str(donor_name)).ratio()
-        if score > best_score:
-            best_score = score
-            best_donor = donor_row['poi_id']
-    if best_donor and best_score > 0.6:
+for i, (_, sparse_row) in enumerate(sparse_meta.iterrows()):
+    sparse_poi = sparse_row['poi_id']
+    sparse_name_vec = sparse_name_vecs[i]
+    # Compute cosine similarity to all non-sparse POI names
+    sims = cosine_similarity(sparse_name_vec, non_sparse_name_vecs)[0]
+    best_idx = np.argmax(sims)
+    best_score = sims[best_idx]
+    best_donor = non_sparse_meta.iloc[best_idx]['poi_id'] if best_score > 0.6 else None
+    if best_donor:
         # Try to get donor check-ins from FSQ, else from Google reviews
         donor_checkins = df[df['poi_id'] == best_donor]
         if donor_checkins.empty:

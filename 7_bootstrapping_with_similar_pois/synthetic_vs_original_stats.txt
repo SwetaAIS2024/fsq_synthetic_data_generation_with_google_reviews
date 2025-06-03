@@ -1,0 +1,18 @@
+Synthetic vs Original Check-in Dataset Statistics
+==============================================
+Dataset: original
+  Number of check-ins: 356381
+  Number of unique POIs: 33892
+  Number of unique users: 8734
+
+Dataset: synthetic
+  Number of check-ins: 1333082
+  Number of unique POIs: 24991
+  Number of unique users: 5304
+
+POIs in both datasets: 24991
+Average check-ins per user (original): 40.80386993359286
+Average check-ins per user (synthetic): 251.33521870286577
+Max check-ins by a user (original): 2735
+Users with >1000 check-ins (original): 14
+Users with >1000 check-ins (synthetic): 236
