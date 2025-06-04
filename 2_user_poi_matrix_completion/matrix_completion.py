@@ -12,7 +12,8 @@ import datetime
 # dataset_path = '../fsq_original_dataset/singapore_checkins.txt'
 dataset_path = 'fsq_original_dataset/singapore_checkins.txt'
 # Assuming the file has columns: user_id, poi_id, timestamp (tab-separated)
-checkins = pd.read_csv(dataset_path, sep='\t', names=['user_id', 'poi_id', 'timestamp'])
+checkins = pd.read_csv(dataset_path, sep='\t', names=['user_id', 'poi_id', 'timestamp', 'country_code'], header=None)
+print(f"head of checkins: {checkins.head()}")
 
 # Lower thresholds to allow more data through filtering
 min_user_checkins = 1 #2
@@ -49,12 +50,11 @@ synthetic_checkins = []
 poi_timestamps = filtered_checkins.groupby('poi_id')['timestamp'].apply(list).to_dict()
 
 for i, user in enumerate(user_idx):
+    # user is the original user_id (should be int or str, as in FSQ)
     # Find POIs not visited by this user (i.e., zero entries)
     user_row = sparse_matrix.getrow(i).toarray().ravel()
     zero_poi_indices = np.where(user_row == 0)[0]
-    # Predict scores for all zero entries
     pred_scores = np.dot(poi_factors[zero_poi_indices], user_factors[i])
-    # Get indices of top-N predictions above threshold
     top_indices = np.argsort(-pred_scores)[:max_synth_per_user]
     for idx in top_indices:
         score = pred_scores[idx]
@@ -67,11 +67,14 @@ for i, user in enumerate(user_idx):
                 timestamp = np.random.choice(timestamps)
             else:
                 timestamp = 'synthetic_timestamp'
-            synthetic_checkins.append({'user_id': user, 'poi_id': poi, 'timestamp': timestamp, 'predicted_score': score})
+            # Ensure user_id is always the original (int or str)
+            synthetic_checkins.append({'user_id': user, 'poi_id': poi, 'timestamp': timestamp})
 
-# 5. Output synthetic check-ins
+# 5. Output synthetic check-ins in correct FSQ format (tab-separated, no header)
 synthetic_df = pd.DataFrame(synthetic_checkins)
-synthetic_df.to_csv('2_user_poi_matrix_completion/synthetic_checkins_with_time.csv', index=False)
+synthetic_df['country_code'] = 480
+synthetic_df = synthetic_df[['user_id', 'poi_id', 'timestamp', 'country_code']]
+synthetic_df.to_csv('2_user_poi_matrix_completion/synthetic_checkins_with_time.csv', sep='\t', index=False, header=False)
 print(f"Generated {len(synthetic_df)} synthetic check-ins with timestamps. Output saved to synthetic_checkins_with_time.csv.")
 
 def extract_time_bin(ts, bin_type='month'):
@@ -129,9 +132,11 @@ for tbin in time_bins:
                     timestamp = timestamp.strftime('%a %b %d 00:00:00 +0000 %Y')
                 except Exception:
                     timestamp = 'synthetic_timestamp'
-                all_synth.append({'user_id': user, 'poi_id': poi, 'timestamp': timestamp, 'time_bin': tbin, 'predicted_score': score})
+                all_synth.append({'user_id': user, 'poi_id': poi, 'timestamp': timestamp})
 
-# Output synthetic check-ins with time bins
+# Output synthetic check-ins with time bins in correct FSQ format (tab-separated, no header)
 synthetic_df = pd.DataFrame(all_synth)
-synthetic_df.to_csv('2_user_poi_matrix_completion/synthetic_checkins_time_binned.csv', index=False)
+synthetic_df['country_code'] = 480
+synthetic_df = synthetic_df[['user_id', 'poi_id', 'timestamp', 'country_code']]
+synthetic_df.to_csv('2_user_poi_matrix_completion/synthetic_checkins_time_binned.csv', sep='\t', index=False, header=False)
 print(f"Generated {len(synthetic_df)} time-binned synthetic check-ins. Output saved to synthetic_checkins_time_binned.csv.")

@@ -119,7 +119,7 @@ for epoch in range(10):
 # 6. Generate synthetic users by sampling latent space, streaming to avoid OOM
 import csv
 
-n_synth = 1000
+n_synth = 100  # Reduced from 1000 to 100 to limit file size
 latent_dim = 32
 batch_synth = 10  # Number of synthetic users to process at once
 output_path = '8_syn_data_gen_models/synthetic_checkins_autoencoder.csv'
@@ -143,7 +143,7 @@ with open(output_path, 'w', newline='') as f:
         with torch.no_grad():
             latent_samples = torch.randn(curr_batch, latent_dim)
             synth_matrix = model.decoder(latent_samples).numpy()
-            synth_matrix = (synth_matrix > 0.5).astype(int)  # Binarize
+            synth_matrix = (synth_matrix > 0.9).astype(int)  # Binarize with higher threshold for sparsity
         user_idx_arr, feat_idx_arr = np.nonzero(synth_matrix)
         for u, f in zip(user_idx_arr, feat_idx_arr):
             poi_idx_val = f // len(timebins)
