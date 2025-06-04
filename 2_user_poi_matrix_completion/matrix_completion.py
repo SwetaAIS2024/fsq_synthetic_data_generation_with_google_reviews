@@ -11,8 +11,8 @@ import datetime
 # Use the correct path relative to the project root
 # dataset_path = '../fsq_original_dataset/singapore_checkins.txt'
 dataset_path = 'fsq_original_dataset/singapore_checkins.txt'
-# Assuming the file has columns: user_id, poi_id, timestamp (tab-separated)
-checkins = pd.read_csv(dataset_path, sep='\t', names=['user_id', 'poi_id', 'timestamp', 'country_code'], header=None)
+# Assuming the file has columns: user_id, poi_id, timestamp, country_code also (tab-separated)
+checkins = pd.read_csv(dataset_path, sep='\t', names=['user_id', 'poi_id', 'timestamp', 'country_code'], header=None) # co-pilot missed to add the country_code, this caused to fail the script
 print(f"head of checkins: {checkins.head()}")
 
 # Lower thresholds to allow more data through filtering
