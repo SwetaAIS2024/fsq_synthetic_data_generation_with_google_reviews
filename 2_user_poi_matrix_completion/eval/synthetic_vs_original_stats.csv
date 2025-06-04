@@ -1,0 +1,3 @@
+dataset,n_checkins,n_unique_pois,n_unique_users
+original,356381,33892,8734
+synthetic,96129,1020,3490
